@@ -1,0 +1,20 @@
+1 billion IDs per day → 12000 requests a second
+
+Approach 1:
+Just have a counter that increments by 1 for each request. By default, IDs will be ordered by date. And even for same date, they will be ordered by their numerical value as needed in FRs. So this satisfies are requirements like uniqueness, ordered by time and 64 bit size.
+
+Limitations:
+- For one server, it is feasible to generate 12000 IDs per second since application is stateless. But if this single server goes down, we will lose the counter value and hence the IDs generated will not be unique. We can solve this by persisting the counter value in a database or a file. But this will add latency to the ID generation process.
+Another thing is if server goes down our complete service will be down and we violate the availability requirement.
+Another limitation is the IDs donot explicitly contain the timestamp. This limits debugging, tracing and future extensibility.
+
+- If we have multiple servers, we need to synchronize the counter across all servers. This can be done using a distributed lock or a distributed counter.
+
+
+Approach 2:
+We fix the first 41 bits for timestamp, next 4 bits for server ID and last 18 bits for counter. This way we can have 16 servers and each server can generate 262,144(2^18) IDs per second. 
+
+Lets estimate the number of IDs we can generate with this approach.
+Per worker:
+18 bits for counter → 2^18 = 262,144 IDs per second
+Our requirement is 12,000 IDs per second, so one worker can easily handle this load. With 16 workers, we can generate 4,194,304 IDs per second which is more than enough for our requirement of 1 billion IDs per day.
