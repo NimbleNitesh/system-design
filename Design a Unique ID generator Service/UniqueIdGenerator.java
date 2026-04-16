@@ -1,5 +1,6 @@
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 
 public class UniqueIdGenerator {
@@ -50,7 +51,7 @@ public class UniqueIdGenerator {
         return (timestamp << (WORKER_ID_BITS + SEQUENCE_BITS)) | (workerId << SEQUENCE_BITS) | sequence;
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws InterruptedException {
         UniqueIdGenerator generator = new UniqueIdGenerator(1);
         ExecutorService executor = Executors.newFixedThreadPool(10);
         for (int i = 0; i < 100; i++) {
@@ -60,6 +61,7 @@ public class UniqueIdGenerator {
             });
         }
         executor.shutdown();
+        executor.awaitTermination(5, TimeUnit.SECONDS);
     }
 
     /** Sample output:
