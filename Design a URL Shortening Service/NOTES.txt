@@ -1,0 +1,71 @@
+Write requests: 100 million per day → 1200 requests per second
+Read requests: 10 billion per day → 120,000 requests per second
+Total URLs stored in 5 years: 182.5 billion URLs
+
+Main idea is to have a mapping from long URL to short URL and vice versa. We will use a database to store this mapping. Given the volume of writes, we will have to use some encoding scheme to generate short URLs. We can use a base62 encoding scheme which uses characters [a-zA-Z0-9] to represent the short URL. This way we can generate a large number of unique short URLs with a small length.
+
+Do we generate a unique short URL each time, even if multiple users submit the same long URL? (Not metioned in FRs, so I will assume that we will generate a new short URL each time).
+
+Can we use numbers and letters (alphanumeric) or other symbols? (Not mentioned in FRs, so I will assume that we use only alphanumeric characters).
+
+Given the character set of 62 characters (26 lowercase + 26 uppercase + 10 digits), we can calculate the number of unique short URLs we can generate with a given length. For example, with a length of 6 characters, we can generate 62^6 = 56.8 billion unique short URLs, which is not sufficient for our needs.
+With a length of 7 characters, we can generate 62^7 = 3.5 trillion unique short URLs, which is more than enough for our needs.
+
+Now we need something to generate unique IDs for each long URL. We can use a simple auto-incrementing integer ID but that would require a centralized service to generate IDs, which can become a bottleneck. We can use a variant of the Snowflake ID generation algorithm:
+- 3 bits for the machine ID (up to 8 machines)
+- 38 bits for the counter (up to 2^38 - 1 unique IDs enough for even 1 single machine for 5 years)
+This will also fit in our 7 character short URL when encoded in base62. 
+- 2^N = 62^7 → N = log2(62^7) = 41.6 bits, so we have enough bits to encode the ID in a 7 character short URL.
+
+We won't keep track of the timestamp in the ID since we don't need to sort the URLs and we can generate enough unique IDs with just the machine ID and counter. Also, this will reduce the length of the ID and thus the length of the short URL. The generated ID will then be encoded using base62 to create the short URL.
+
+Therefore, to support our projected growth over the next 5 years, our shortened URLs need a minimum of 7 characters.
+
+HIGH LEVEL DESIGN
+Our URL shortening service will consist of the following components:
+1. Users: Users will interact with the service to shorten URLs and access the original URLs.
+2. API Gateway: The API Gateway will handle incoming requests from users and route them to the appropriate services.
+3. URL Shortening Service: This service will handle the logic for generating short URLs and storing the mappings in the database.
+4. Database: The database will store the mappings between long URLs and short URLs.
+
+Each URL mapping will include the short URL(roughly 7 bytes), long URL (average 100 bytes), and metadata (creation date, expiration date, etc. approx 500 bytes). This means that each URL mapping will require approximately 650 bytes of storage. With 182.5 billion URLs, we will need approximately 120 TB of storage for the URL mappings alone.  
+
+API Design:
+1. Create a Short URL:
+    - POST /shorten
+    - Request Body: { "long_url": "https://www.example.com/very/long/url" }
+    - Response Body: { "short_url": "http://short.url/abc123" } with a 201 Created status code.
+    - Error Handling: If the long URL is invalid, return a 400 Bad Request status code with an appropriate error message.
+
+2. Retrieve the Original URL:
+    - GET /{short_url}
+    - Response Body: { "long_url": "https://www.example.com/very/long/url" } with a 301 Moved Permanently status code. 301 status code is used to indicate that the resource has been permanently moved to a new URL, which means the next time the user tries to access the short URL, the browser will automatically redirect to the long URL without needing to make another request to the server.
+    - Error Handling: If the short URL does not exist, return a 404 Not Found status code with an appropriate error message.
+
+Database Design:
+The schema for the URL mapping can be as follows:
+Table: url_mapping
+- short_url (primary key, text, unique)
+- long_url (text)
+- created_at (timestamp)
+- expires_at (timestamp)
+- metadata (jsonb)
+
+Given the volume of the data and simple query patterns, we should use a NoSQL database that can handle high read throughput and can scale horizontally. I would prefer a key-value store like DynamoDB. But we can consider Cassandra or MongoDB as well. We can use the short URL as the key and the long URL along with metadata as the value.
+It won't be ACID compliant but our query patterns are simple and we don't require complex transactions.
+
+Query Patterns:
+1. To create a short URL, we will generate a new unique id(Integer) and then encode it using the base62 encoding scheme to create the short URL. We will store this mapping(Short URL -> Long URL) in the database.
+2. To retrieve the original URL, we will query the database using the short URL as the key and return the corresponding long URL. If the short URL does not exist, we will return a 404 Not Found error.
+
+URL Shortner Service:
+1. Using Base62 Encoding
+To generate a short URL, we can use a base62 encoding scheme. For every new long URL, we can generate a unique ID and then encode that ID into a base62 string to create the short URL. This approach ensures that we can generate a large number of unique short URLs while keeping the length of the short URL manageable.
+
+2. For generating unique ids across multiple instances, we can use Snowflake IDs. Encoding the ID into a base62 string means that collisions are not possible, as each ID will map to a unique short URL. 
+
+3. Caching:
+To handle the high read throughput, we can implement caching for the short URL to long URL mappings. We can use an in-memory cache like Redis to store frequently accessed short URLs and their corresponding long URLs. This will help reduce the load on the database and improve response times for users.
+
+4. Expiration:
+We can implement an expiration mechanism for the short URLs. When a short URL is created, we can set an expiration date for it (e.g., 5 year). We can use a background job to periodically check for expired short URLs and remove them from the database. This will help free up storage space and ensure that our database does not grow indefinitely with old, unused URLs.

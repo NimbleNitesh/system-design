@@ -17,4 +17,4 @@ We fix the first 41 bits for timestamp, next 4 bits for server ID and 18 bits fo
 Lets estimate the number of IDs we can generate with this approach.
 Per worker:
 18 bits for counter → 2^18 = 262,144 IDs per millisecond
-Our requirement is 12,000 IDs per second, so one worker can easily handle this load. With 16 workers, we can generate 4,194,304 IDs per second which is more than enough for our requirement of 1 billion IDs per day.
+Our requirement is 12,000 IDs per second, so one worker can easily handle this load. With 16 workers, we can generate 4,194,304 IDs per millisecond which is more than enough for our requirement of 1 billion IDs per day.
